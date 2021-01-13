@@ -15,15 +15,17 @@ let web3Modal;
 // Chosen wallet provider given by the dialog window
 let provider;
 
-// Address of the selected account
-let selectedAccount;
-
 // token contract address
 const contractAddress = "0x1319b0457c4e39a259F8e18d1e2Dc316A941aE20";
 // contract abi
 const contractAbi = [
   "function createToken(address tokenOwner, bytes32 ticket) public",
 ];
+
+function getInfuraId() {
+  const provider = new ethers.providers.InfuraProvider();
+  return provider.apiKey;
+}
 
 /**
  * Setup the orchestra
@@ -46,7 +48,7 @@ function init() {
       package: WalletConnectProvider,
       options: {
         // Mikko's test key - don't copy as your mileage may vary
-        infuraId: "8043bb2cf99347b1bfadfb233c5325c0",
+        infuraId: getInfuraId(),
       },
     },
   };
@@ -74,8 +76,11 @@ async function fetchAccountData() {
 
   // Get account of the connected wallet
   const signer = wallet.getSigner();
-  selectedAccount = await signer.getAddress();
+  const selectedAccount = await signer.getAddress();
   document.querySelector("#selected-account").textContent = selectedAccount;
+
+  // set the token recipient address to the signer address
+  document.getElementById("token-recipient").value = selectedAccount;
 
   // Get account balance
   const balance = await signer.getBalance();
@@ -83,11 +88,10 @@ async function fetchAccountData() {
     "#account-balance"
   ).textContent = ethers.utils.formatEther(balance);
 
-  document.getElementById("txhash").textContent = "";
-
   // Display fully loaded UI for wallet data
   document.querySelector("#prepare").style.display = "none";
   document.querySelector("#connected").style.display = "block";
+  document.getElementById("btn-create-token").removeAttribute("disabled");
 }
 
 /**
@@ -102,6 +106,10 @@ async function refreshAccountData() {
   // immediate hide this data
   document.querySelector("#connected").style.display = "none";
   document.querySelector("#prepare").style.display = "block";
+
+  // hide the createToken result on page refresh, only displays the result
+  // when result is returned from the contract
+  document.getElementById("status").textContent = "";
 
   // Disable button while UI is loading.
   // fetchAccountData() will take a while as it communicates
@@ -160,15 +168,20 @@ async function onDisconnect() {
     provider = null;
   }
 
-  selectedAccount = null;
-
   // Set the UI back to the initial state
   document.querySelector("#prepare").style.display = "block";
   document.querySelector("#connected").style.display = "none";
 }
 
 async function onCreateToken() {
-  let ticketByte32String;
+  // disable the button while waiting for result
+  const createTokenButton = document.getElementById("btn-create-token");
+  createTokenButton.setAttribute("disabled", "disabled");
+
+  // clear
+  const status = document.getElementById("status");
+  status.textContent =
+    "processing... please approve the transaction from the wallet";
 
   try {
     const wallet = new ethers.providers.Web3Provider(provider);
@@ -178,21 +191,18 @@ async function onCreateToken() {
     const recipientAddress = document.getElementById("token-recipient").value;
     const ticketValue = document.getElementById("ticket").value;
 
-    try {
-      ticketByte32String = ethers.utils.formatBytes32String(ticketValue);
-    } catch (err) {
-      console.log("format ticket value error", err);
-      alert("format ticket value error: " + err.message);
-      return;
-    }
-
+    const ticketByte32String = ethers.utils.formatBytes32String(ticketValue);
     const tx = await contract.createToken(recipientAddress, ticketByte32String);
 
-    document.getElementById("txhash").textContent = tx.hash;
+    console.log("tx", tx);
+    // show the transaction hash
+    status.textContent = "transaction hash: " + tx.hash;
   } catch (err) {
-    console.log("create token error for ticket ", ticketByte32String, err);
-    alert("Create token error. See wallet for more details. " + err.message);
+    console.log("create token error", err);
+    status.textContent = `Create token error: ${err.message}. More details may be found in the wallet log.`;
   }
+
+  createTokenButton.removeAttribute("disabled");
 }
 
 /**
